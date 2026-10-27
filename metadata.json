@@ -1,0 +1,6 @@
+{
+  "name": "JARVIS AI",
+  "description": "Advanced personal Android assistant inspired by JARVIS, featuring voice interaction, multilingual support (English, Telugu, Hindi, Tanglish), device control, workflows, and AI reasoning.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
