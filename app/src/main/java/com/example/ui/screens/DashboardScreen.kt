@@ -14,6 +14,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -30,10 +31,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.Hearing
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
-import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -70,7 +69,6 @@ import com.example.ui.components.WaveformVisualizer
 import com.example.ui.theme.JarvisCyan
 import com.example.ui.theme.JarvisCyanBright
 import com.example.ui.theme.JarvisElectricBlue
-import com.example.ui.theme.JarvisGreen
 import com.example.ui.theme.JarvisRed
 import com.example.ui.theme.JarvisSurface
 import com.example.ui.theme.JarvisSurfaceVariant
@@ -82,11 +80,9 @@ fun DashboardScreen(
     partialSpeech: String,
     rmsVolume: Float,
     isSpeaking: Boolean,
-    isContinuousListening: Boolean,
     pendingAction: ActionProposal?,
     onStartVoice: () -> Unit,
     onStopVoice: () -> Unit,
-    onToggleContinuousListening: () -> Unit,
     onStopSpeaking: () -> Unit,
     onSendText: (String) -> Unit,
     onConfirmAction: (ActionProposal) -> Unit,
@@ -105,14 +101,6 @@ fun DashboardScreen(
         }
     }
 
-    val continuousPermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        if (granted) {
-            onToggleContinuousListening()
-        }
-    }
-
     val handleMicClick = {
         val hasPermission = ContextCompat.checkSelfPermission(
             context,
@@ -120,26 +108,13 @@ fun DashboardScreen(
         ) == PackageManager.PERMISSION_GRANTED
 
         if (hasPermission) {
-            if (jarvisState == JarvisState.LISTENING && !isContinuousListening) {
+            if (jarvisState == JarvisState.LISTENING) {
                 onStopVoice()
             } else {
                 onStartVoice()
             }
         } else {
             micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-        }
-    }
-
-    val handleContinuousToggle = {
-        val hasPermission = ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.RECORD_AUDIO
-        ) == PackageManager.PERMISSION_GRANTED
-
-        if (hasPermission) {
-            onToggleContinuousListening()
-        } else {
-            continuousPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
     }
 
@@ -189,8 +164,8 @@ fun DashboardScreen(
                     Text(
                         text = when (jarvisState) {
                             JarvisState.IDLE -> "STANDBY // READY"
-                            JarvisState.LISTENING -> if (isContinuousListening) "CONTINUOUS LISTENING // ON" else "AUDIO INPUT ACTIVE"
-                            JarvisState.THINKING -> "PROCESSING INTENT WITH GEMINI..."
+                            JarvisState.LISTENING -> "AUDIO INPUT ACTIVE"
+                            JarvisState.THINKING -> "PROCESSING INTENT..."
                             JarvisState.SPEAKING -> "SYNTHESIZING SPEECH"
                             JarvisState.EXECUTING -> "RUNNING OS PROTOCOL"
                             JarvisState.CONFIRMATION_REQUIRED -> "AWAITING AUTHORIZATION"
@@ -202,99 +177,27 @@ fun DashboardScreen(
                     )
                 }
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (isSpeaking) {
-                        IconButton(
-                            onClick = onStopSpeaking,
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(JarvisRed.copy(alpha = 0.2f))
-                                .testTag("stop_speaking_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Stop,
-                                contentDescription = "Stop Speaking",
-                                tint = JarvisRed,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
+                if (isSpeaking) {
+                    IconButton(
+                        onClick = onStopSpeaking,
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(JarvisRed.copy(alpha = 0.2f))
+                            .testTag("stop_speaking_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Stop,
+                            contentDescription = "Stop Speaking",
+                            tint = JarvisRed,
+                            modifier = Modifier.size(20.dp)
+                        )
                     }
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(10.dp))
-
-        // Hands-Free / Continuous Listening Mode Bar
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(10.dp))
-                .background(if (isContinuousListening) Color(0xFF0C243B) else JarvisSurface)
-                .border(
-                    1.dp,
-                    if (isContinuousListening) JarvisCyan else Color(0xFF1B3050),
-                    RoundedCornerShape(10.dp)
-                )
-                .clickable { handleContinuousToggle() }
-                .padding(horizontal = 12.dp, vertical = 8.dp)
-                .testTag("toggle_continuous_listening"),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = Icons.Default.Sensors,
-                    contentDescription = null,
-                    tint = if (isContinuousListening) JarvisGreen else Color(0xFF6B83A8),
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Column {
-                    Text(
-                        text = "CONTINUOUS LISTENING (HANDS-FREE)",
-                        color = Color.White,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace
-                    )
-                    Text(
-                        text = if (isContinuousListening)
-                            "Listening continuously for commands without button presses"
-                        else
-                            "Tap to enable always-on voice command detection",
-                        color = if (isContinuousListening) JarvisCyanBright else Color(0xFF758CA8),
-                        fontSize = 10.sp
-                    )
-                }
-            }
-
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(
-                        if (isContinuousListening) JarvisGreen.copy(alpha = 0.25f)
-                        else Color(0xFF16253A)
-                    )
-                    .border(
-                        1.dp,
-                        if (isContinuousListening) JarvisGreen else Color(0xFF263D5C),
-                        RoundedCornerShape(6.dp)
-                    )
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
-            ) {
-                Text(
-                    text = if (isContinuousListening) "ACTIVE" else "OFF",
-                    color = if (isContinuousListening) JarvisGreen else Color(0xFF869DBE),
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(20.dp))
 
         // Center Animated Arc Reactor Core
         ArcReactorCore(
@@ -325,7 +228,7 @@ fun DashboardScreen(
         ) {
             Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    text = if (partialSpeech.isNotBlank()) "TRANSCRIPT (LIVE):" else "INTELLIGENCE LOG:",
+                    text = if (partialSpeech.isNotBlank()) "TRANSCRIPT:" else "INTELLIGENCE LOG:",
                     color = JarvisCyanBright,
                     fontSize = 10.sp,
                     fontFamily = FontFamily.Monospace,
@@ -407,7 +310,7 @@ fun DashboardScreen(
                     .testTag("command_input_field"),
                 placeholder = {
                     Text(
-                        text = if (isContinuousListening) "Listening hands-free..." else "Speak or type command...",
+                        text = "Speak or type command...",
                         color = Color(0xFF6B83A8),
                         fontSize = 13.sp
                     )
@@ -455,27 +358,15 @@ fun DashboardScreen(
             // Push-To-Talk Mic FAB
             FloatingActionButton(
                 onClick = handleMicClick,
-                containerColor = when {
-                    isContinuousListening -> JarvisGreen
-                    jarvisState == JarvisState.LISTENING -> JarvisRed
-                    else -> JarvisCyan
-                },
-                contentColor = when {
-                    isContinuousListening -> Color(0xFF00222A)
-                    jarvisState == JarvisState.LISTENING -> Color.White
-                    else -> Color(0xFF00222A)
-                },
+                containerColor = if (jarvisState == JarvisState.LISTENING) JarvisRed else JarvisCyan,
+                contentColor = if (jarvisState == JarvisState.LISTENING) Color.White else Color(0xFF00222A),
                 shape = CircleShape,
                 modifier = Modifier
                     .size(52.dp)
                     .testTag("push_to_talk_button")
             ) {
                 Icon(
-                    imageVector = when {
-                        isContinuousListening -> Icons.Default.Hearing
-                        jarvisState == JarvisState.LISTENING -> Icons.Default.MicOff
-                        else -> Icons.Default.Mic
-                    },
+                    imageVector = if (jarvisState == JarvisState.LISTENING) Icons.Default.MicOff else Icons.Default.Mic,
                     contentDescription = if (jarvisState == JarvisState.LISTENING) "Stop Microphone" else "Start Microphone"
                 )
             }

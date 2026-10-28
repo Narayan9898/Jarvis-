@@ -20,31 +20,24 @@ class TtsManager(context: Context) : TextToSpeech.OnInitListener {
     private var speechRate = 1.0f
     private var speechPitch = 1.0f
 
-    var onSpeechStarted: (() -> Unit)? = null
-    var onSpeechCompleted: (() -> Unit)? = null
-
     init {
         tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(utteranceId: String?) {
                 _isSpeaking.value = true
-                onSpeechStarted?.invoke()
             }
 
             override fun onDone(utteranceId: String?) {
                 _isSpeaking.value = false
-                onSpeechCompleted?.invoke()
             }
 
             @Deprecated("Deprecated in Java")
             override fun onError(utteranceId: String?) {
                 _isSpeaking.value = false
-                onSpeechCompleted?.invoke()
             }
 
             override fun onError(utteranceId: String?, errorCode: Int) {
                 _isSpeaking.value = false
                 Log.w("TtsManager", "TTS error code: $errorCode")
-                onSpeechCompleted?.invoke()
             }
         })
     }
