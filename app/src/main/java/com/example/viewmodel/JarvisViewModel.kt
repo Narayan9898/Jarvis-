@@ -2,6 +2,7 @@ package com.example.viewmodel
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.viewModelScope
 import com.example.BuildConfig
 import com.example.JarvisApplication
@@ -37,7 +38,7 @@ class JarvisViewModel(application: Application) : AndroidViewModel(application) 
     private val app = application as JarvisApplication
     private val database = app.database
     private val actionExecutor = app.actionExecutor
-    private val speechManager = app.speechManager
+    val speechManager = app.speechManager
     private val ttsManager = app.ttsManager
     private val aiRepository = app.aiRepository
     private val workflowEngine = app.workflowEngine
@@ -64,6 +65,7 @@ class JarvisViewModel(application: Application) : AndroidViewModel(application) 
     val apiKey: StateFlow<String> = _apiKey.asStateFlow()
 
     val isListening: StateFlow<Boolean> = speechManager.isListening
+    val isContinuousListening: StateFlow<Boolean> = speechManager.isContinuousMode
     val rmsVolume: StateFlow<Float> = speechManager.rmsVolume
     val partialSpeech: StateFlow<String> = speechManager.partialText
     val isSpeaking: StateFlow<Boolean> = ttsManager.isSpeaking
@@ -92,23 +94,44 @@ class JarvisViewModel(application: Application) : AndroidViewModel(application) 
     val installedApps: StateFlow<List<AppInfo>> = _installedApps.asStateFlow()
 
     init {
-        setupSpeechCallbacks()
+        setupSpeechAndTtsCallbacks()
         loadInstalledApps()
     }
 
-    private fun setupSpeechCallbacks() {
+    private fun setupSpeechAndTtsCallbacks() {
+        // Speech Recognizer callbacks
         speechManager.onSpeechResult = { text ->
             _jarvisState.value = JarvisState.THINKING
             handleIncomingUserQuery(text)
         }
 
+        speechManager.onPartialSpeech = { partial ->
+            if (_jarvisState.value != JarvisState.THINKING && _jarvisState.value != JarvisState.SPEAKING) {
+                _jarvisState.value = JarvisState.LISTENING
+            }
+        }
+
         speechManager.onSpeechError = { errorMsg ->
-            _jarvisState.value = JarvisState.ERROR
-            _statusText.value = errorMsg
-            viewModelScope.launch {
-                database.conversationDao().insertMessage(
-                    ChatMessageEntity(sender = "SYSTEM", text = errorMsg)
-                )
+            if (!speechManager.isContinuousMode.value) {
+                _jarvisState.value = JarvisState.ERROR
+                _statusText.value = errorMsg
+                viewModelScope.launch {
+                    database.conversationDao().insertMessage(
+                        ChatMessageEntity(sender = "SYSTEM", text = errorMsg)
+                    )
+                }
+            }
+        }
+
+        // TTS Speech lifecycle synchronization: pause recognizer during speech, resume after
+        ttsManager.onSpeechStarted = {
+            speechManager.pauseForTts()
+        }
+
+        ttsManager.onSpeechCompleted = {
+            speechManager.resumeAfterTts()
+            if (_jarvisState.value == JarvisState.SPEAKING) {
+                _jarvisState.value = if (speechManager.isContinuousMode.value) JarvisState.LISTENING else JarvisState.IDLE
             }
         }
     }
@@ -143,10 +166,23 @@ class JarvisViewModel(application: Application) : AndroidViewModel(application) 
         _jarvisState.value = JarvisState.IDLE
     }
 
+    fun toggleContinuousListening() {
+        val nextMode = !speechManager.isContinuousMode.value
+        ttsManager.stop()
+        speechManager.setContinuousListening(nextMode, _selectedLanguage.value.code)
+        if (nextMode) {
+            _jarvisState.value = JarvisState.LISTENING
+            _statusText.value = "Continuous hands-free listening enabled. Speak any command."
+        } else {
+            _jarvisState.value = JarvisState.IDLE
+            _statusText.value = "Continuous listening paused. Push to talk ready."
+        }
+    }
+
     fun stopSpeaking() {
         ttsManager.stop()
         if (_jarvisState.value == JarvisState.SPEAKING) {
-            _jarvisState.value = JarvisState.IDLE
+            _jarvisState.value = if (speechManager.isContinuousMode.value) JarvisState.LISTENING else JarvisState.IDLE
         }
     }
 
@@ -168,14 +204,19 @@ class JarvisViewModel(application: Application) : AndroidViewModel(application) 
                 )
             )
 
-            // Gather memory context
+            // Gather memory context & recent conversation turns for Gemini API
             val memories = database.memoryDao().getMemoryByCategory("PREFERENCE")
             val memoryContext = memories.joinToString("; ") { "${it.key}: ${it.value}" }
+
+            val recentEntities = database.conversationDao().getRecentMessages(6)
+            val recentHistory = recentEntities.reversed().map { "${it.sender}: ${it.text}" }
 
             val response = aiRepository.processQuery(
                 query = query,
                 apiKey = _apiKey.value,
-                memoryContext = memoryContext
+                memoryContext = memoryContext,
+                recentHistory = recentHistory,
+                preferredLanguage = _selectedLanguage.value
             )
 
             _statusText.value = response.replyText
@@ -205,7 +246,7 @@ class JarvisViewModel(application: Application) : AndroidViewModel(application) 
 
     fun cancelPendingAction() {
         _pendingAction.value = null
-        _jarvisState.value = JarvisState.IDLE
+        _jarvisState.value = if (speechManager.isContinuousMode.value) JarvisState.LISTENING else JarvisState.IDLE
         val cancelMsg = "Action aborted."
         _statusText.value = cancelMsg
         speak(cancelMsg, "en")
@@ -232,7 +273,6 @@ class JarvisViewModel(application: Application) : AndroidViewModel(application) 
 
             saveJarvisMessage(result.message, lang, action.actionId, result.success)
             speak(result.message, lang)
-            _jarvisState.value = JarvisState.IDLE
         }
     }
 

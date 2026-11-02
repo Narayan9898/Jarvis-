@@ -29,6 +29,8 @@ class AiRepository {
         .readTimeout(20, TimeUnit.SECONDS)
         .build()
 
+    val languageDetector = LanguageDetector()
+
     /**
      * Determines intent, language, and structured action.
      * Uses Gemini API if API key is provided, or uses the local offline NLU engine.
@@ -36,11 +38,15 @@ class AiRepository {
     suspend fun processQuery(
         query: String,
         apiKey: String,
-        memoryContext: String = ""
+        memoryContext: String = "",
+        recentHistory: List<String> = emptyList(),
+        preferredLanguage: AssistantLanguage = AssistantLanguage.AUTO
     ): AiResponse = withContext(Dispatchers.IO) {
-        val detectedLang = detectLanguage(query)
+        // Step 1: Detect user's input language and build context-aware Gemini directive
+        val langResult = languageDetector.analyze(query, preferredLanguage)
+        val detectedLang = langResult.languageCode
 
-        // Try local high-confidence direct device action matcher first for speed and privacy
+        // Step 2: Try local high-confidence direct device action matcher first for speed and privacy
         val localAction = extractLocalAction(query)
         if (localAction != null) {
             val reply = generateActionConfirmationMessage(localAction, detectedLang)
@@ -51,10 +57,17 @@ class AiRepository {
             )
         }
 
-        // If an API key is available, attempt Gemini generation
+        // Step 3: If an API key is available, execute context-aware Gemini generation
         if (apiKey.isNotBlank() && apiKey != "MY_GEMINI_API_KEY") {
             try {
-                val geminiResult = callGeminiApi(query, apiKey, memoryContext, detectedLang)
+                val geminiResult = callGeminiApi(
+                    query = query,
+                    apiKey = apiKey,
+                    memoryContext = memoryContext,
+                    langDirective = langResult.geminiDirective,
+                    detectedLang = detectedLang,
+                    recentHistory = recentHistory
+                )
                 if (geminiResult != null) {
                     return@withContext geminiResult
                 }
@@ -63,7 +76,7 @@ class AiRepository {
             }
         }
 
-        // Offline conversational intelligence & local knowledge
+        // Step 4: Offline conversational intelligence & local knowledge
         val offlineReply = generateLocalKnowledgeReply(query, detectedLang)
         AiResponse(
             replyText = offlineReply,
@@ -73,18 +86,7 @@ class AiRepository {
     }
 
     fun detectLanguage(text: String): String {
-        val teluguPattern = Pattern.compile("[\\u0C00-\\u0C7F]")
-        val hindiPattern = Pattern.compile("[\\u0900-\\u097F]")
-
-        if (teluguPattern.matcher(text).find()) return "te"
-        if (hindiPattern.matcher(text).find()) return "hi"
-
-        val lower = text.lowercase()
-        // Tanglish keyword detection
-        val tanglishKeywords = listOf("cheyi", "pettuko", "cheppu", "ekkada", "namaskaram", "ela", "undhi", "ravali", "ivvu")
-        if (tanglishKeywords.any { lower.contains(it) }) return "tanglish"
-
-        return "en"
+        return languageDetector.analyze(text).languageCode
     }
 
     /**
@@ -342,18 +344,25 @@ class AiRepository {
         query: String,
         apiKey: String,
         memoryContext: String,
-        detectedLang: String
+        langDirective: String,
+        detectedLang: String,
+        recentHistory: List<String> = emptyList()
     ): AiResponse? = withContext(Dispatchers.IO) {
         val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$apiKey"
 
+        val historyBlock = if (recentHistory.isNotEmpty()) {
+            "Recent Conversation History:\n" + recentHistory.takeLast(6).joinToString("\n") + "\n\n"
+        } else ""
+
         val systemPrompt = """
             You are JARVIS, an advanced, highly capable, professional, and slightly witty personal assistant on Android.
-            You understand English, Telugu (తెలుగు), Hindi (हिन्दी), and Tanglish.
-            Always reply naturally in the same language and script as the user.
+            
+            $langDirective
             
             Memory and User Preferences:
             $memoryContext
             
+            $historyBlock
             If the user asks for a physical mobile phone action, you can output an action plan JSON inside an ```action``` block:
             ```action
             {"action": "open_app", "parameters": {"app_name": "youtube"}}

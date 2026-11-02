@@ -57,6 +57,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        // Bind SpeechManager to Activity lifecycle for safe continuous listening
+        lifecycle.addObserver(viewModel.speechManager)
+
         setContent {
             JarvisTheme {
                 JarvisApp(viewModel)
@@ -77,6 +81,7 @@ fun JarvisApp(viewModel: JarvisViewModel) {
     val rmsVolume by viewModel.rmsVolume.collectAsStateWithLifecycle()
     val partialSpeech by viewModel.partialSpeech.collectAsStateWithLifecycle()
     val isSpeaking by viewModel.isSpeaking.collectAsStateWithLifecycle()
+    val isContinuousListening by viewModel.isContinuousListening.collectAsStateWithLifecycle()
 
     val isExecutingWorkflow by viewModel.isExecutingWorkflow.collectAsStateWithLifecycle()
     val workflowStatus by viewModel.workflowStatus.collectAsStateWithLifecycle()
@@ -168,9 +173,11 @@ fun JarvisApp(viewModel: JarvisViewModel) {
                 partialSpeech = partialSpeech,
                 rmsVolume = rmsVolume,
                 isSpeaking = isSpeaking,
+                isContinuousListening = isContinuousListening,
                 pendingAction = pendingAction,
                 onStartVoice = { viewModel.startListening() },
                 onStopVoice = { viewModel.stopListening() },
+                onToggleContinuousListening = { viewModel.toggleContinuousListening() },
                 onStopSpeaking = { viewModel.stopSpeaking() },
                 onSendText = { viewModel.sendTextQuery(it) },
                 onConfirmAction = { viewModel.confirmPendingAction(it) },
